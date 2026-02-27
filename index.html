@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tsinghua Physics Lab: Bandgap & Absorption</title>
+    <style>
+        body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f4f7f6; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+        
+        /* Tsinghua University Header Style */
+        .tsinghua-header {
+            text-align: center;
+            margin-bottom: 25px;
+            border-bottom: 3px solid #612c82; /* Tsinghua Purple */
+            padding-bottom: 15px;
+            width: 100%;
+            max-width: 900px;
+        }
+        .tsinghua-title {
+            font-family: "Times New Roman", Times, serif;
+            font-size: 32px;
+            font-weight: bold;
+            color: #612c82;
+            letter-spacing: 2px;
+            margin: 0;
+            text-transform: uppercase;
+        }
+        .lab-subtitle {
+            font-size: 1.2em;
+            color: #34495e;
+            margin-top: 5px;
+            font-weight: 500;
+        }
+
+        .container { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); max-width: 900px; width: 100%; }
+        canvas { background: #050505; border-radius: 8px; display: block; margin: 0 auto; }
+        .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; background: #f1f3f5; padding: 20px; border-radius: 10px; margin-top: 20px; }
+        .control-group { display: flex; flex-direction: column; }
+        label { font-size: 0.9em; font-weight: bold; margin-bottom: 10px; color: #495057; display: flex; justify-content: space-between; }
+        .status-panel { margin-top: 15px; padding: 10px; border-radius: 6px; text-align: center; font-weight: bold; font-size: 1.1em; }
+        .absorbed { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .transparent { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+        .button-group { grid-column: span 2; display: flex; gap: 10px; }
+        
+        button { 
+            flex: 1; padding: 10px; cursor: pointer; border: 1px solid #ced4da; border-radius: 4px; 
+            background: white; transition: 0.2s; font-weight: bold;
+        }
+        button:hover { background: #f8f9fa; border-color: #612c82; }
+        #flexBtn { color: #612c82; border-color: #612c82; }
+        #toggleBtn { background: #612c82; color: white; border: none; }
+        #toggleBtn:hover { background: #4a1d64; }
+    </style>
+</head>
+<body>
+
+<div class="tsinghua-header">
+    <div class="tsinghua-title">Tsinghua University</div>
+    <div class="lab-subtitle">Semiconductor Physics: Absorption Threshold Simulation</div>
+</div>
+
+<div class="container">
+    <canvas id="pvCanvas" width="850" height="350"></canvas>
+
+    <div id="status" class="status-panel">Adjust Sliders to Compare hν and Eg</div>
+
+    <div class="controls">
+        <div class="control-group">
+            <label>Photon energy (hν): <span><span id="eLabel">1.80</span> eV</span></label>
+            <input type="range" id="eInput" min="100" max="350" value="180">
+        </div>
+        <div class="control-group">
+            <label>Perovskite bandgap (Eg): <span><span id="egLabel">1.60</span> eV</span></label>
+            <input type="range" id="egInput" min="100" max="300" value="160">
+        </div>
+        <div class="button-group">
+            <button id="flexBtn">Toggle Bending (Flexible)</button>
+            <button id="toggleBtn">Pause / Resume</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('pvCanvas');
+    const ctx = canvas.getContext('2d');
+    const eInput = document.getElementById('eInput');
+    const egInput = document.getElementById('egInput');
+    const statusPanel = document.getElementById('status');
+
+    let isRunning = true;
+    let isBent = false;
+    let particles = [];
+    let photons = [];
+
+    function getBend(x) { return isBent ? Math.sin(x / 100) * 25 : 0; }
+
+    function energyToColor(ev) {
+        if (ev > 3.0) return '#8e44ad'; // Violet
+        if (ev > 2.5) return '#2980b9'; // Blue
+        if (ev > 2.0) return '#27ae60'; // Green
+        if (ev > 1.7) return '#f1c40f'; // Yellow
+        if (ev > 1.4) return '#e67e22'; // Orange
+        return '#c0392b'; // Red
+    }
+
+    class Carrier {
+        constructor(x, y, type) {
+            this.x = x;
+            this.yRel = y - getBend(x);
+            this.type = type;
+            this.life = 1.0;
+        }
+        update() {
+            const speed = 1.5;
+            if (this.type === 'electron') this.x += speed; else this.x -= speed;
+            if (Math.random() < 0.005) this.life = 0;
+        }
+        draw() {
+            const y = this.yRel + getBend(this.x);
+            ctx.beginPath();
+            ctx.arc(this.x, y, 4, 0, Math.PI * 2);
+            ctx.fillStyle = this.type === 'electron' ? '#3498db' : '#e74c3c';
+            ctx.fill();
+        }
+    }
+
+    class Photon {
+        constructor(energy) {
+            this.x = canvas.width;
+            this.yOffset = (Math.random() - 0.5) * 80;
+            this.energy = energy;
+            this.color = energyToColor(energy);
+            this.isConsumed = false;
+        }
+        update(eg) {
+            this.x -= 4;
+            const currentY = 175 + this.yOffset + getBend(this.x);
+
+            if (this.x < 650 && this.x > 200 && !this.isConsumed) {
+                if (this.energy >= eg) {
+                    let alpha = (this.energy - eg + 0.1) * 0.1;
+                    if (Math.random() < alpha) {
+                        particles.push(new Carrier(this.x, currentY, 'electron'));
+                        particles.push(new Carrier(this.x, currentY, 'hole'));
+                        this.isConsumed = true;
+                        return false;
+                    }
+                }
+            }
+            return this.x > 0;
+        }
+        draw() {
+            const y = 175 + this.yOffset + getBend(this.x);
+            ctx.beginPath();
+            ctx.moveTo(this.x, y);
+            ctx.lineTo(this.x + 15, y);
+            ctx.strokeStyle = this.color;
+            ctx.lineWidth = 3;
+            ctx.stroke();
+        }
+    }
+
+    function drawLayers() {
+        const drawL = (x, w, color, txt) => {
+            ctx.fillStyle = color; ctx.globalAlpha = 0.2;
+            ctx.beginPath();
+            for (let i = x; i <= x+w; i+=5) ctx.lineTo(i, 110 + getBend(i));
+            for (let i = x+w; i >= x; i-=5) ctx.lineTo(i, 240 + getBend(i));
+            ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+            
+            ctx.font = "bold 20px Arial";
+            ctx.fillStyle = "#fff"; 
+            ctx.fillText(txt, x + 10, 100 + getBend(x));
+        };
+        drawL(50, 150, '#0000FF', 'HTL (p)');      
+        drawL(200, 450, '#FF0000', 'Perovskite (i)'); 
+        drawL(650, 150, '#00FF00', 'ETL (n)');    
+    }
+
+    function animate() {
+        if (!isRunning) return;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        const photonE = eInput.value / 100;
+        const bandgapE = egInput.value / 100;
+        document.getElementById('eLabel').innerText = photonE.toFixed(2);
+        document.getElementById('egLabel').innerText = bandgapE.toFixed(2);
+
+        if (photonE >= bandgapE) {
+            statusPanel.innerHTML = `Condition: hν ≥ Eg → <span style="color:#2ecc71">ABSORPTION</span>`;
+            statusPanel.className = "status-panel absorbed";
+        } else {
+            statusPanel.innerHTML = `Condition: hν < Eg → <span style="color:#e67e22">TRANSPARENT</span>`;
+            statusPanel.className = "status-panel transparent";
+        }
+
+        drawLayers();
+
+        if (Math.random() < 0.2) photons.push(new Photon(photonE));
+
+        photons = photons.filter(p => {
+            const active = p.update(bandgapE);
+            if (!p.isConsumed) p.draw();
+            return active;
+        });
+
+        particles = particles.filter(p => {
+            p.update(); p.draw();
+            return p.life > 0 && p.x > 50 && p.x < 800;
+        });
+
+        requestAnimationFrame(animate);
+    }
+
+    document.getElementById('toggleBtn').onclick = () => isRunning = !isRunning;
+    document.getElementById('flexBtn').onclick = () => isBent = !isBent;
+
+    animate();
+</script>
+</body>
+</html>
